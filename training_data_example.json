@@ -1,0 +1,32 @@
+[
+    {
+        "question": "What is the Bellman equation?",
+        "pdf": "RL_lecture.pdf",
+        "pages": [49, 50],
+        "notes": "Main definition and derivation"
+    },
+    {
+        "question": "What is Q-learning?",
+        "pdf": "RL_lecture.pdf",
+        "pages": [55, 56, 57],
+        "notes": "Algorithm and update rule"
+    },
+    {
+        "question": "What is policy iteration?",
+        "pdf": "RL_lecture.pdf",
+        "pages": [38, 39, 40],
+        "notes": "Policy evaluation and improvement"
+    },
+    {
+        "question": "What is the difference between on-policy and off-policy?",
+        "pdf": "RL_lecture.pdf",
+        "pages": [52, 53],
+        "notes": ""
+    },
+    {
+        "question": "How does temporal difference learning work?",
+        "pdf": "RL_lecture.pdf",
+        "pages": [45, 46],
+        "notes": "TD(0) and TD(λ)"
+    }
+]
