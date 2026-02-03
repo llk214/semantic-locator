@@ -1,8 +1,8 @@
-# 📚 Semantic Page Locator
+# 📚 Locus - PDF Semantic Search
 
 **Find the exact page that answers your question.**
 
-A lightweight desktop tool for students to search through course PDFs using natural language. Type a question like *"What is the Bellman equation?"* and instantly get the page numbers where it's explained.
+A lightweight desktop tool for students to search through course PDFs using natural language. 
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)
@@ -12,9 +12,10 @@ A lightweight desktop tool for students to search through course PDFs using natu
 
 ## ✨ Features
 
-- **Hybrid Search** — Combines keyword matching (BM25) with meaning-based ranking
+- **Hybrid Search** — Combines keyword matching (BM25) with semantic understanding
+- **Two Index Modes** — Fast mode for quick startup, Deep mode for comprehensive search
+- **Multilingual Support** — Search Chinese documents with English queries (and vice versa)
 - **Works Offline** — No internet needed after initial setup
-- **Lightweight** — Runs smoothly on 4GB laptops
 - **Open PDF at Page** — Double-click a result to jump directly to that page
 - **Adjustable Search Mode** — Slider to balance between semantic and literal matching
 
@@ -22,7 +23,11 @@ A lightweight desktop tool for students to search through course PDFs using natu
 
 ## 🚀 Quick Start
 
-### 1. Install
+### Option A: Download Executable (Windows)
+
+Download the latest release from [Releases](https://github.com/llk214/semantic-locator/releases) and run `Locus.exe`.
+
+### Option B: Run from Source
 
 ```bash
 # Clone the repo
@@ -31,33 +36,60 @@ cd semantic-locator
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Run
-
-```bash
+# Run
 python gui.py
 ```
 
-### 3. Use
+---
+
+## 📖 How to Use
 
 1. Click **Browse** and select a folder containing your PDFs
-2. Click **Load/Rebuild Index** (first time takes ~30 seconds)
+2. Click **Load Index** and choose index mode:
+   - **⚡ Fast Index** — Quick startup, good for small collections
+   - **🔬 Deep Index** — Slower startup, finds all semantically related content
 3. Type your question and hit **Search**
 4. Double-click any result to open the PDF at that page
 
 ---
 
-## 🎛️ Search Quality Options
+## 🎛️ Model Options
 
-Choose based on your hardware:
+Choose based on your hardware and needs:
 
-| Option | Download Size | RAM Needed | Best For |
-|--------|---------------|------------|----------|
-| ⚡ Fast | ~80MB | 4GB | Older laptops |
-| ⚖️ Balanced | ~420MB | 8GB | Most users |
-| 🎯 High Accuracy | ~440MB | 8GB | Better results |
-| 🚀 Best | ~1.3GB | 16GB+ | Gaming PCs |
+| Option | Size | RAM | Best For            |
+|--------|------|-----|---------------------|
+| ⚡ Fast | ~80MB | 4GB | Any laptop, fastest |
+| ⚖️ Balanced | ~130MB | 4GB | Standard laptops    |
+| 🎯 High Accuracy | ~440MB | 8GB | Better results      |
+| 🚀 Best | ~1.3GB | 16GB | Performance PCs     |
+| 🌍 Multilingual | ~2.2GB | 16GB+ | 100+ languages      |
+
+---
+
+## 🔬 Index Modes
+
+| Mode | Startup | Search | Use When |
+|------|---------|--------|----------|
+| ⚡ Fast | Quick | Good | Small collections, quick lookups |
+| 🔬 Deep | Slower | Best | Large collections, thorough research |
+
+**Deep mode** pre-computes embeddings for all pages, enabling:
+- Full semantic search across all documents
+- Finding related content even without keyword matches
+- Cross-lingual search (with Multilingual model)
+
+---
+
+## 🌍 Multilingual Search
+
+With the **🌍 Multilingual** model, you can:
+- Search Chinese PDFs with English queries
+- Search English PDFs with Chinese queries
+- Mix languages in your document collection
+
+When cross-lingual search is active, you'll see: `🌍 Cross-lingual: X results (semantic only)`
 
 ---
 
@@ -72,7 +104,7 @@ Adjust how search works:
 | Slide Left | Slide Right |
 |------------|-------------|
 | Understands meaning | Matches exact words |
-| *"How does learning from experience work?"* | *"Bellman equation"* |
+| *"How to prevent overfitting?"* | *"regularization"* |
 
 ---
 
@@ -87,7 +119,7 @@ Adjust how search works:
 ## 🛠️ Requirements
 
 - Python 3.8+
-- ~500MB disk space (for models)
+- ~500MB - 2.5GB disk space (depending on model)
 - PDF reader with command-line support (e.g., [SumatraPDF](https://www.sumatrapdfreader.org/))
 
 ---
@@ -95,22 +127,27 @@ Adjust how search works:
 ## 📦 Dependencies
 
 ```
-PyMuPDF          # PDF text extraction
-rank-bm25        # Keyword search
-sentence-transformers  # Semantic matching
+PyMuPDF              # PDF text extraction
+rank-bm25            # Keyword search
+sentence-transformers # Semantic matching
+customtkinter        # Modern GUI
 ```
 
 ---
 
 ## 💡 Tips for Better Results
 
-1. **Add student notes** — Well-organized notes with clear headings improve search quality
+1. **Use Deep mode** for large collections — ensures nothing is missed
 2. **Use specific terms** — *"Q-learning update rule"* works better than *"how does it learn"*
-3. **Adjust the slider** — Use literal mode for exact terms, semantic mode for concepts
+3. **Adjust the slider** — Literal mode for exact terms, semantic mode for concepts
+4. **Try Multilingual** — if you have mixed-language documents
 
 ---
 
 ## 🤔 FAQ
+
+**What's the difference between Fast and Deep index?**  
+Fast mode uses BM25 to filter candidates first (may miss semantically related pages). Deep mode searches all pages semantically (slower startup, better results).
 
 **Is this an AI/LLM?**  
 No. It uses embedding models for similarity matching, not generative AI. It finds information — it doesn't generate answers.

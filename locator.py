@@ -35,10 +35,19 @@ class PageDocument:
 
 
 def tokenize(text: str) -> list[str]:
-    """Simple tokenization: lowercase, split on non-alphanumeric."""
+    """Tokenization supporting English and Chinese."""
     text = text.lower()
-    tokens = re.findall(r'\b[a-z0-9]+\b', text)
-    # Remove very short tokens and stopwords
+    
+    # Extract English words
+    english_tokens = re.findall(r'\b[a-z0-9]+\b', text)
+    
+    # Extract Chinese characters (each character is a token)
+    chinese_tokens = re.findall(r'[\u4e00-\u9fff]', text)
+    
+    # Combine tokens
+    tokens = english_tokens + chinese_tokens
+    
+    # Remove English stopwords
     stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 
                  'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
                  'would', 'could', 'should', 'may', 'might', 'must', 'shall',
@@ -51,7 +60,7 @@ def tokenize(text: str) -> list[str]:
                  'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but',
                  'if', 'or', 'because', 'until', 'while', 'this', 'that', 'these',
                  'those', 'it', 'its'}
-    return [t for t in tokens if len(t) > 1 and t not in stopwords]
+    return [t for t in tokens if len(t) > 1 or '\u4e00' <= t <= '\u9fff' and t not in stopwords]
 
 
 class PDFIndexer:
@@ -125,9 +134,23 @@ class SemanticReranker:
     """Sentence transformer-based semantic reranking."""
     
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        print(f"Loading model: {model_name}")
+        print(f"Loading search model: {model_name}")
+        print("(First run downloads the model - please wait...)")
         self.model = SentenceTransformer(model_name)
         self.model_name = model_name
+        
+        # Check if this is a BGE model (needs query/passage prefixes)
+        self.is_bge = "bge" in model_name.lower()
+        print("Model loaded successfully!")
+    
+    def _add_prefix(self, text: str, is_query: bool = False) -> str:
+        """Add prefix for BGE models."""
+        if not self.is_bge:
+            return text
+        if is_query:
+            return f"query: {text}"
+        else:
+            return f"passage: {text}"
     
     def rerank(self, query: str, candidates: list[tuple[PageDocument, float]], 
                top_k: int = 5, bm25_weight: float = 0.3) -> list[tuple[PageDocument, float]]:
@@ -143,11 +166,12 @@ class SemanticReranker:
         if not candidates:
             return []
         
-        # Encode query
-        query_embedding = self.model.encode(query, convert_to_tensor=True)
+        # Encode query (with prefix for BGE)
+        query_text = self._add_prefix(query, is_query=True)
+        query_embedding = self.model.encode(query_text, convert_to_tensor=True)
         
-        # Encode all candidate texts (truncate long pages)
-        texts = [doc.text[:2000] for doc, _ in candidates]  # Truncate for efficiency
+        # Encode all candidate texts (with prefix for BGE, truncate long pages)
+        texts = [self._add_prefix(doc.text[:2000], is_query=False) for doc, _ in candidates]
         doc_embeddings = self.model.encode(texts, convert_to_tensor=True)
         
         # Compute semantic similarities
@@ -182,6 +206,8 @@ class HybridLocator:
         self.bm25: Optional[BM25Retriever] = None
         self.reranker: Optional[SemanticReranker] = None
         self.documents: list[PageDocument] = []
+        self.doc_embeddings = None  # Pre-computed embeddings
+        self.deep_mode = False  # Whether using pre-computed embeddings
         
     def build_index(self, force_rebuild: bool = False):
         """Build or load the search index."""
@@ -213,9 +239,30 @@ class HybridLocator:
         else:
             self.reranker = None
             print("Running in keywords-only mode (no semantic reranking)")
+    
+    def precompute_embeddings(self):
+        """Pre-compute embeddings for all documents (Deep mode)."""
+        if not self.reranker:
+            print("No semantic model loaded, skipping embedding computation")
+            return
+        
+        print(f"Computing embeddings for {len(self.documents)} pages...")
+        
+        # Prepare texts with prefix for BGE models
+        texts = [self.reranker._add_prefix(doc.text[:2000], is_query=False) 
+                 for doc in self.documents]
+        
+        # Encode all documents
+        self.doc_embeddings = self.reranker.model.encode(
+            texts, 
+            convert_to_tensor=True,
+            show_progress_bar=True
+        )
+        self.deep_mode = True
+        print("Embeddings computed and ready!")
         
     def search(self, query: str, top_k: int = 5, bm25_candidates: int = 20,
-               bm25_weight: float = 0.3) -> list[dict]:
+               bm25_weight: float = 0.3) -> tuple[list[dict], bool]:
         """
         Search for pages relevant to the query.
         
@@ -226,16 +273,40 @@ class HybridLocator:
             bm25_weight: Weight for BM25 in final score (0-1)
             
         Returns:
-            List of dicts with pdf_name, page_num, score, snippet
+            Tuple of (results list, is_cross_lingual flag)
         """
         if self.bm25 is None:
             raise RuntimeError("Index not built. Call build_index() first.")
         
+        is_cross_lingual = False
+        
+        # Check if using multilingual model
+        is_multilingual_model = self.model_name and "bge-m3" in self.model_name.lower()
+        
+        # Deep mode: use pre-computed embeddings for full semantic search
+        if self.deep_mode and self.reranker and self.doc_embeddings is not None:
+            return self._search_deep(query, top_k, bm25_weight, is_multilingual_model)
+        
+        # Fast mode: BM25 filtering + semantic reranking
         # Stage 1: BM25 retrieval
         candidates = self.bm25.search(query, top_k=bm25_candidates)
         
+        # If BM25 finds nothing and using multilingual model, do pure semantic search
+        # This enables cross-lingual search (e.g., Chinese query → English docs)
+        # Only for multilingual model - English models would give garbage results
+        if not candidates and self.reranker and is_multilingual_model:
+            # Use all documents as candidates for semantic search
+            all_candidates = [(doc, 0.0) for doc in self.documents]
+            # Sample if too many (for performance)
+            if len(all_candidates) > 100:
+                import random
+                all_candidates = random.sample(all_candidates, 100)
+            candidates = all_candidates
+            bm25_weight = 0.0  # Pure semantic search
+            is_cross_lingual = True
+        
         if not candidates:
-            return []
+            return [], False
         
         # Stage 2: Semantic reranking (if model available)
         if self.reranker:
@@ -257,7 +328,52 @@ class HybridLocator:
                 'snippet': snippet
             })
         
-        return output
+        return output, is_cross_lingual
+    
+    def _search_deep(self, query: str, top_k: int, bm25_weight: float, 
+                     is_multilingual: bool) -> tuple[list[dict], bool]:
+        """Deep search using pre-computed embeddings."""
+        from sentence_transformers import util
+        
+        is_cross_lingual = False
+        
+        # Get BM25 scores for all documents
+        query_tokens = tokenize(query)
+        bm25_scores = np.array(self.bm25.bm25.get_scores(query_tokens))
+        
+        # Check if BM25 found anything (for cross-lingual detection)
+        if bm25_scores.max() == 0 and is_multilingual:
+            is_cross_lingual = True
+            bm25_weight = 0.0
+        
+        # Normalize BM25 scores
+        if bm25_scores.max() > 0:
+            bm25_scores = bm25_scores / bm25_scores.max()
+        
+        # Compute semantic scores using pre-computed embeddings
+        query_text = self.reranker._add_prefix(query, is_query=True)
+        query_embedding = self.reranker.model.encode(query_text, convert_to_tensor=True)
+        semantic_scores = util.cos_sim(query_embedding, self.doc_embeddings)[0].cpu().numpy()
+        
+        # Combine scores
+        combined_scores = (1 - bm25_weight) * semantic_scores + bm25_weight * bm25_scores
+        
+        # Get top results
+        top_indices = np.argsort(combined_scores)[::-1][:top_k]
+        
+        # Format output
+        output = []
+        for idx in top_indices:
+            doc = self.documents[idx]
+            snippet = self._extract_snippet(doc.text, query)
+            output.append({
+                'pdf_name': doc.pdf_name,
+                'page_num': doc.page_num,
+                'score': round(float(combined_scores[idx]), 3),
+                'snippet': snippet
+            })
+        
+        return output, is_cross_lingual
     
     def _extract_snippet(self, text: str, query: str, max_len: int = 200) -> str:
         """Extract a relevant snippet from the page text."""
