@@ -1,19 +1,70 @@
 """
 Hybrid Semantic Page Locator for Course PDFs
-BM25 keyword search + Sentence Transformer reranking
+BM25 keyword search + FastEmbed reranking (lightweight ONNX-based)
 """
 
 import os
+import sys
 import json
 import pickle
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
+
+# ----------------------------
+# Bundled model configuration
+# ----------------------------
+BUNDLED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+def _get_bundled_model_path() -> Optional[str]:
+    """Get path to bundled model if it exists (for PyInstaller builds)."""
+    # Check various locations where bundled model might be
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller exe
+        base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+        possible_paths = [
+            os.path.join(base_path, '_internal', 'models', 'bge-small-en-v1.5'),
+            os.path.join(base_path, 'models', 'bge-small-en-v1.5'),
+            os.path.join(os.path.dirname(sys.executable), '_internal', 'models', 'bge-small-en-v1.5'),
+            os.path.join(os.path.dirname(sys.executable), 'models', 'bge-small-en-v1.5'),
+        ]
+    else:
+        # Running as script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        possible_paths = [
+            os.path.join(script_dir, 'models', 'bge-small-en-v1.5'),
+        ]
+    
+    for path in possible_paths:
+        # Check if model.onnx exists in the path
+        if os.path.exists(path):
+            for root, dirs, files in os.walk(path):
+                if 'model.onnx' in files or 'model_optimized.onnx' in files:
+                    return path
+    return None
+
+
+# ----------------------------
+# FastEmbed cache configuration
+# ----------------------------
+def _default_fastembed_cache_dir() -> str:
+    """Choose a persistent cache directory for FastEmbed (avoid system Temp)."""
+    home = str(Path.home())
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or home
+        return os.path.join(base, "Locus", "fastembed_cache")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Caches", "Locus", "fastembed_cache")
+    return os.path.join(home, ".cache", "Locus", "fastembed_cache")
+
+# Set once, early, so all FastEmbed usage is consistent across the app.
+os.environ.setdefault("FASTEMBED_CACHE_PATH", _default_fastembed_cache_dir())
+os.makedirs(os.environ["FASTEMBED_CACHE_PATH"], exist_ok=True)
+
 import fitz  # PyMuPDF
 import numpy as np
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer, util
 import re
 
 
@@ -60,7 +111,10 @@ def tokenize(text: str) -> list[str]:
                  'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but',
                  'if', 'or', 'because', 'until', 'while', 'this', 'that', 'these',
                  'those', 'it', 'its'}
-    return [t for t in tokens if len(t) > 1 or '\u4e00' <= t <= '\u9fff' and t not in stopwords]
+    def _is_cjk_char(tok: str) -> bool:
+        return len(tok) == 1 and '\u4e00' <= tok <= '\u9fff'
+
+    return [t for t in tokens if (len(t) > 1 or _is_cjk_char(t)) and t not in stopwords]
 
 
 class PDFIndexer:
@@ -130,27 +184,104 @@ class BM25Retriever:
         return results
 
 
+# Model name mapping: GUI names -> FastEmbed model names
+MODEL_NAME_MAP = {
+    # English models
+    "BAAI/bge-small-en-v1.5": "BAAI/bge-small-en-v1.5",
+    "BAAI/bge-base-en-v1.5": "BAAI/bge-base-en-v1.5",
+    "BAAI/bge-large-en-v1.5": "BAAI/bge-large-en-v1.5",
+    # Chinese models
+    "BAAI/bge-small-zh-v1.5": "BAAI/bge-small-zh-v1.5",
+    "BAAI/bge-large-zh-v1.5": "BAAI/bge-large-zh-v1.5",
+    # Multilingual
+    "BAAI/bge-m3": "BAAI/bge-m3",
+    # Legacy (kept for backward compatibility)
+    "intfloat/multilingual-e5-large": "intfloat/multilingual-e5-large",
+}
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Compute cosine similarity between query vector and document vectors."""
+    # Normalize vectors
+    a_norm = a / np.linalg.norm(a)
+    b_norm = b / np.linalg.norm(b, axis=1, keepdims=True)
+    return np.dot(b_norm, a_norm)
+
+
 class SemanticReranker:
-    """Sentence transformer-based semantic reranking."""
+    """FastEmbed-based semantic reranking (lightweight ONNX)."""
     
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+        from fastembed import TextEmbedding
+        
         print(f"Loading search model: {model_name}")
-        print("(First run downloads the model - please wait...)")
-        self.model = SentenceTransformer(model_name)
+        
+        # Map model name if needed
+        fastembed_name = MODEL_NAME_MAP.get(model_name, model_name)
+        cache_dir = os.environ.get("FASTEMBED_CACHE_PATH")
+        
+        # Check if we should use bundled model
+        bundled_path = _get_bundled_model_path()
+        if bundled_path and model_name == BUNDLED_MODEL_NAME:
+            print(f"Using bundled model from: {bundled_path}")
+            # Use local_files_only to prevent download attempts
+            self.model = TextEmbedding(
+                model_name=fastembed_name,
+                cache_dir=cache_dir,
+                local_files_only=False  # Still allow fallback to download
+            )
+            # Copy bundled model to cache if not already there
+            self._ensure_bundled_model_in_cache(bundled_path, cache_dir, fastembed_name)
+        else:
+            print("(First run downloads the model - please wait...)")
+            self.model = TextEmbedding(model_name=fastembed_name, cache_dir=cache_dir)
+        
         self.model_name = model_name
         
-        # Check if this is a BGE model (needs query/passage prefixes)
-        self.is_bge = "bge" in model_name.lower()
+        # Check if this model needs query/passage prefixes
+        # BGE models and E5 models both use these prefixes
+        self.needs_prefix = "bge" in model_name.lower() or "e5" in model_name.lower()
         print("Model loaded successfully!")
     
+    def _ensure_bundled_model_in_cache(self, bundled_path: str, cache_dir: str, model_name: str):
+        """Copy bundled model to cache directory if not already present."""
+        import shutil
+        
+        # FastEmbed expects models in a specific structure
+        # We'll copy to cache so it can find it naturally
+        model_short = model_name.split("/")[-1]
+        
+        # Check if model already exists in cache
+        if cache_dir:
+            for folder in os.listdir(cache_dir) if os.path.exists(cache_dir) else []:
+                if model_short in folder:
+                    folder_path = os.path.join(cache_dir, folder)
+                    for root, dirs, files in os.walk(folder_path):
+                        if 'model.onnx' in files or 'model_optimized.onnx' in files:
+                            return  # Model already in cache
+        
+        # Model not in cache, but bundled model exists - FastEmbed will handle it
+    
     def _add_prefix(self, text: str, is_query: bool = False) -> str:
-        """Add prefix for BGE models."""
-        if not self.is_bge:
+        """Add prefix for BGE/E5 models."""
+        if not self.needs_prefix:
             return text
         if is_query:
             return f"query: {text}"
         else:
             return f"passage: {text}"
+    
+    def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
+        """Encode texts to embeddings."""
+        # Add prefixes for BGE models
+        prefixed_texts = [self._add_prefix(t, is_query) for t in texts]
+        # FastEmbed returns a generator, convert to numpy array
+        embeddings = list(self.model.embed(prefixed_texts))
+        return np.array(embeddings)
+    
+    def encode_single(self, text: str, is_query: bool = False) -> np.ndarray:
+        """Encode a single text to embedding."""
+        return self.encode([text], is_query)[0]
     
     def rerank(self, query: str, candidates: list[tuple[PageDocument, float]], 
                top_k: int = 5, bm25_weight: float = 0.3) -> list[tuple[PageDocument, float]]:
@@ -166,16 +297,15 @@ class SemanticReranker:
         if not candidates:
             return []
         
-        # Encode query (with prefix for BGE)
-        query_text = self._add_prefix(query, is_query=True)
-        query_embedding = self.model.encode(query_text, convert_to_tensor=True)
+        # Encode query
+        query_embedding = self.encode_single(query, is_query=True)
         
-        # Encode all candidate texts (with prefix for BGE, truncate long pages)
-        texts = [self._add_prefix(doc.text[:2000], is_query=False) for doc, _ in candidates]
-        doc_embeddings = self.model.encode(texts, convert_to_tensor=True)
+        # Encode all candidate texts (truncate long pages)
+        texts = [doc.text[:2000] for doc, _ in candidates]
+        doc_embeddings = self.encode(texts, is_query=False)
         
         # Compute semantic similarities
-        semantic_scores = util.cos_sim(query_embedding, doc_embeddings)[0].cpu().numpy()
+        semantic_scores = cosine_similarity(query_embedding, doc_embeddings)
         
         # Normalize BM25 scores
         bm25_scores = np.array([score for _, score in candidates])
@@ -199,7 +329,7 @@ class SemanticReranker:
 class HybridLocator:
     """Main interface combining BM25 + semantic reranking."""
     
-    def __init__(self, pdf_dir: str, model_name: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, pdf_dir: str, model_name: Optional[str] = "BAAI/bge-small-en-v1.5"):
         self.pdf_dir = Path(pdf_dir)
         self.model_name = model_name
         self.indexer: Optional[PDFIndexer] = None
@@ -240,24 +370,40 @@ class HybridLocator:
             self.reranker = None
             print("Running in keywords-only mode (no semantic reranking)")
     
-    def precompute_embeddings(self):
-        """Pre-compute embeddings for all documents (Deep mode)."""
+    def precompute_embeddings(self, progress_callback=None):
+        """Pre-compute embeddings for all documents (Deep mode).
+        
+        Args:
+            progress_callback: Optional function(current, total) to report progress
+        """
         if not self.reranker:
             print("No semantic model loaded, skipping embedding computation")
             return
         
-        print(f"Computing embeddings for {len(self.documents)} pages...")
+        total = len(self.documents)
+        print(f"Computing embeddings for {total} pages...")
         
-        # Prepare texts with prefix for BGE models
-        texts = [self.reranker._add_prefix(doc.text[:2000], is_query=False) 
-                 for doc in self.documents]
+        # Prepare texts (truncate long pages)
+        texts = [doc.text[:2000] for doc in self.documents]
         
-        # Encode all documents
-        self.doc_embeddings = self.reranker.model.encode(
-            texts, 
-            convert_to_tensor=True,
-            show_progress_bar=True
-        )
+        # Encode in batches to show progress
+        batch_size = 10
+        all_embeddings = []
+        
+        for i in range(0, total, batch_size):
+            batch_texts = texts[i:i+batch_size]
+            batch_embeddings = self.reranker.encode(batch_texts, is_query=False)
+            all_embeddings.append(batch_embeddings)
+            
+            # Report progress
+            current = min(i + batch_size, total)
+            if progress_callback:
+                progress_callback(current, total)
+            print(f"  Processed {current}/{total} pages...")
+        
+        # Combine all embeddings
+        import numpy as np
+        self.doc_embeddings = np.vstack(all_embeddings)
         self.deep_mode = True
         print("Embeddings computed and ready!")
         
@@ -281,7 +427,13 @@ class HybridLocator:
         is_cross_lingual = False
         
         # Check if using multilingual model
-        is_multilingual_model = self.model_name and "bge-m3" in self.model_name.lower()
+        is_multilingual_model = self.model_name and (
+            "multilingual" in self.model_name.lower() 
+            or "e5" in self.model_name.lower()
+            or "bge-m3" in self.model_name.lower()
+            or "zh" in self.model_name.lower()
+            or "chinese" in self.model_name.lower()
+        )
         
         # Deep mode: use pre-computed embeddings for full semantic search
         if self.deep_mode and self.reranker and self.doc_embeddings is not None:
@@ -333,8 +485,6 @@ class HybridLocator:
     def _search_deep(self, query: str, top_k: int, bm25_weight: float, 
                      is_multilingual: bool) -> tuple[list[dict], bool]:
         """Deep search using pre-computed embeddings."""
-        from sentence_transformers import util
-        
         is_cross_lingual = False
         
         # Get BM25 scores for all documents
@@ -351,9 +501,8 @@ class HybridLocator:
             bm25_scores = bm25_scores / bm25_scores.max()
         
         # Compute semantic scores using pre-computed embeddings
-        query_text = self.reranker._add_prefix(query, is_query=True)
-        query_embedding = self.reranker.model.encode(query_text, convert_to_tensor=True)
-        semantic_scores = util.cos_sim(query_embedding, self.doc_embeddings)[0].cpu().numpy()
+        query_embedding = self.reranker.encode_single(query, is_query=True)
+        semantic_scores = cosine_similarity(query_embedding, self.doc_embeddings)
         
         # Combine scores
         combined_scores = (1 - bm25_weight) * semantic_scores + bm25_weight * bm25_scores
@@ -404,7 +553,7 @@ class HybridLocator:
     
     def search_formatted(self, query: str, **kwargs) -> str:
         """Search and return formatted string output."""
-        results = self.search(query, **kwargs)
+        results, _ = self.search(query, **kwargs)
         
         if not results:
             return f"No results found for: {query}"
@@ -420,116 +569,6 @@ class HybridLocator:
 
 
 # ============================================================
-# Training utilities for fine-tuning the reranker
-# ============================================================
-
-class TrainingDataGenerator:
-    """Generate training pairs from annotated data."""
-    
-    @staticmethod
-    def from_json(json_path: str) -> list[dict]:
-        """
-        Load training data from JSON file.
-        
-        Expected format:
-        [
-            {"question": "What is the Bellman equation?", 
-             "pdf": "RL_lecture.pdf", 
-             "pages": [49, 50]},
-            ...
-        ]
-        """
-        with open(json_path, 'r') as f:
-            return json.load(f)
-    
-    @staticmethod
-    def create_template(output_path: str, num_examples: int = 50):
-        """Create a template JSON file for annotation."""
-        template = [
-            {
-                "question": "Example: What is Q-learning?",
-                "pdf": "lecture_notes.pdf",
-                "pages": [42, 43],
-                "notes": "Optional notes about this example"
-            }
-        ]
-        
-        with open(output_path, 'w') as f:
-            json.dump(template, f, indent=2)
-        
-        print(f"Template created at: {output_path}")
-        print("Edit this file to add your question→page annotations.")
-
-
-def fine_tune_reranker(locator: HybridLocator, training_data: list[dict],
-                       output_dir: str, epochs: int = 3):
-    """
-    Fine-tune the reranker on your question→page pairs.
-    
-    This creates training triplets: (query, positive_page, negative_page)
-    """
-    from sentence_transformers import InputExample, losses
-    from torch.utils.data import DataLoader
-    
-    # Build document lookup
-    doc_lookup = {}
-    for doc in locator.documents:
-        key = (doc.pdf_name, doc.page_num)
-        doc_lookup[key] = doc
-    
-    # Create training examples
-    train_examples = []
-    
-    for item in training_data:
-        question = item['question']
-        pdf_name = item['pdf']
-        positive_pages = item['pages']
-        
-        for page_num in positive_pages:
-            key = (pdf_name, page_num)
-            if key not in doc_lookup:
-                print(f"Warning: Page not found: {pdf_name} page {page_num}")
-                continue
-            
-            positive_doc = doc_lookup[key]
-            
-            # Create a training pair
-            train_examples.append(InputExample(
-                texts=[question, positive_doc.text[:1000]],
-                label=1.0
-            ))
-            
-            # Add negative examples (random pages from same PDF)
-            for neg_doc in locator.documents:
-                if neg_doc.pdf_name == pdf_name and neg_doc.page_num not in positive_pages:
-                    train_examples.append(InputExample(
-                        texts=[question, neg_doc.text[:1000]],
-                        label=0.0
-                    ))
-                    break  # Just one negative per positive
-    
-    if not train_examples:
-        print("No valid training examples found!")
-        return
-    
-    print(f"Created {len(train_examples)} training examples")
-    
-    # Fine-tune
-    model = locator.reranker.model
-    train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=8)
-    train_loss = losses.CosineSimilarityLoss(model)
-    
-    model.fit(
-        train_objectives=[(train_dataloader, train_loss)],
-        epochs=epochs,
-        warmup_steps=10,
-        output_path=output_dir
-    )
-    
-    print(f"Fine-tuned model saved to: {output_dir}")
-
-
-# ============================================================
 # CLI Interface
 # ============================================================
 
@@ -542,17 +581,18 @@ def main():
     parser.add_argument('--rebuild', action='store_true', help="Force rebuild index")
     parser.add_argument('--top-k', type=int, default=5, help="Number of results")
     parser.add_argument('--interactive', '-i', action='store_true', help="Interactive mode")
-    parser.add_argument('--create-training-template', help="Create training data template")
+    parser.add_argument('--deep', '-d', action='store_true', help="Use deep indexing mode")
+    parser.add_argument('--model', '-m', default="BAAI/bge-small-en-v1.5",
+                        help="Model to use")
     
     args = parser.parse_args()
     
-    if args.create_training_template:
-        TrainingDataGenerator.create_template(args.create_training_template)
-        return
-    
     # Initialize locator
-    locator = HybridLocator(args.pdf_dir)
+    locator = HybridLocator(args.pdf_dir, model_name=args.model)
     locator.build_index(force_rebuild=args.rebuild)
+    
+    if args.deep:
+        locator.precompute_embeddings()
     
     if args.interactive:
         print("\nInteractive mode. Type 'quit' to exit.\n")
