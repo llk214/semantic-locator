@@ -264,6 +264,25 @@ def show_manage_models_dialog(gui):
             button_hover_color=("gray55", "gray40"), font=ui_font(11)
         ).grid(row=0, column=1, padx=(0, 4), pady=6, sticky="w")
 
+        # Cache actions
+        cache_frame = ctk.CTkFrame(dialog, corner_radius=6, fg_color="transparent")
+        cache_frame.pack(fill="x", padx=15, pady=(0, 12))
+        cache_frame.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkButton(
+            cache_frame, text=t("cache.clear_index"), width=160, height=26,
+            corner_radius=6, fg_color=("gray75", "gray28"),
+            hover_color=("gray65", "gray35"), font=ui_font(10),
+            command=gui._clear_index_cache
+        ).grid(row=0, column=0, padx=(0, 8), pady=4, sticky="w")
+        
+        ctk.CTkButton(
+            cache_frame, text=t("cache.clear_ocr"), width=160, height=26,
+            corner_radius=6, fg_color=("gray75", "gray28"),
+            hover_color=("gray65", "gray35"), font=ui_font(10),
+            command=gui._clear_ocr_cache
+        ).grid(row=0, column=1, padx=(0, 4), pady=4, sticky="w")
+
         # Position and show
         dialog.geometry("480x420")
         dialog.update_idletasks()

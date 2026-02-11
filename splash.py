@@ -3,6 +3,9 @@ Splash screen shown immediately on startup while heavy libraries load.
 """
 
 import tkinter as tk
+import os
+import sys
+import ctypes
 from i18n import t
 from fonts import ui_font, emoji_font, _resolve_zh_font
 
@@ -11,6 +14,23 @@ class SplashScreen:
     def __init__(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)  # No window decorations
+
+        if os.name == "nt":
+            try:
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Locus.App")
+            except Exception:
+                pass
+
+        try:
+            if getattr(sys, "frozen", False):
+                base = os.path.dirname(sys.executable)
+            else:
+                base = os.path.dirname(os.path.abspath(__file__))
+            direct = os.path.join(base, "locus.ico")
+            internal = os.path.join(base, "_internal", "locus.ico")
+            self.root.iconbitmap(internal if os.path.exists(internal) else direct)
+        except Exception:
+            pass
         
         # Resolve Chinese font now that we have a tk root
         _resolve_zh_font(self.root)

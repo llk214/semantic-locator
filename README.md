@@ -1,8 +1,8 @@
-# 📚 Locus - PDF Semantic Search
+# Locus - PDF Semantic Search
 
 **Find the exact page that answers your question.**
 
-A lightweight desktop tool for students to search through course PDFs using natural language. 
+A lightweight desktop app for students and researchers to search PDF folders using natural language.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)
@@ -10,30 +10,26 @@ A lightweight desktop tool for students to search through course PDFs using natu
 
 ---
 
-## ✨ Features
+## Features
 
-- **Hybrid Search** — Combines keyword matching (BM25) with semantic understanding
-- **Two Index Modes** — Fast mode for quick startup, Deep mode for comprehensive search
-- **Multilingual Support** — Search Chinese documents with English queries (and vice versa)
-- **Works Offline** — No internet needed after initial setup
-- **Open PDF at Page** — Double-click a result to jump directly to that page
-- **Adjustable Search Mode** — Slider to balance between semantic and literal matching
+- **Hybrid search**: BM25 keyword retrieval + semantic reranking (FastEmbed)
+- **Two index modes**: Fast (quick startup) and Deep (precomputed embeddings)
+- **Chunked indexing**: better precision while keeping page numbers
+- **Optional OCR**: for scanned PDFs or image-only pages
+- **Multilingual search**: cross-lingual matching with the multilingual model
+- **Open PDF at page**: jump directly to the relevant page
+- **Model manager**: download/delete models and choose fusion method
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Option A: Download Executable (Windows)
+### Option A: Windows EXE
+Download the latest release from [Releases](https://github.com/llk214/locus/releases) and run `Locus.exe`.
 
-Download the latest release from [Releases](https://github.com/llk214/semantic-locator/releases) and run `Locus.exe`.
-
-### Option B: Run from Source
+### Option B: Run from source
 
 ```bash
-# Clone the repo
-git clone https://github.com/llk214/semantic-locator.git
-cd semantic-locator
-
 # Install dependencies
 pip install -r requirements.txt
 
@@ -43,129 +39,96 @@ python gui.py
 
 ---
 
-## 📖 How to Use
+## How to Use
 
-1. Click **Browse** and select a folder containing your PDFs
-2. Click **Load Index** and choose index mode:
-   - **⚡ Fast Index** — Quick startup, good for small collections
-   - **🔬 Deep Index** — Slower startup, finds all semantically related content
-3. Type your question and hit **Search**
-4. Double-click any result to open the PDF at that page
-
----
-
-## 🎛️ Model Options
-
-Choose based on your hardware and needs:
-
-| Option | Size | RAM | Best For            |
-|--------|------|-----|---------------------|
-| ⚡ Fast | ~80MB | 4GB | Any laptop, fastest |
-| ⚖️ Balanced | ~130MB | 4GB | Standard laptops    |
-| 🎯 High Accuracy | ~440MB | 8GB | Better results      |
-| 🚀 Best | ~1.3GB | 16GB | Performance PCs     |
-| 🌍 Multilingual | ~2.2GB | 16GB+ | 100+ languages      |
+1. Click **Browse** and select a folder containing PDFs.
+2. Click **Load Index** (or **Rebuild Index** when files/models change).
+3. Choose index mode:
+   - **Fast Index**: faster startup, good for small collections
+   - **Deep Index**: slower startup, best recall
+4. Type a query and press **Search**.
+5. Double-click a result to open the PDF at the correct page.
 
 ---
 
-## 🔬 Index Modes
+## Search Quality (Models)
 
-| Mode | Startup | Search | Use When |
-|------|---------|--------|----------|
-| ⚡ Fast | Quick | Good | Small collections, quick lookups |
-| 🔬 Deep | Slower | Best | Large collections, thorough research |
+- **Balanced / High / Best** control embedding model size and accuracy.
+- **Multilingual** enables cross-lingual search.
 
-**Deep mode** pre-computes embeddings for all pages, enabling:
-- Full semantic search across all documents
-- Finding related content even without keyword matches
-- Cross-lingual search (with Multilingual model)
+> Tip: Use the **Manage Models** window to download/delete models.
 
 ---
 
-## 🌍 Multilingual Search
+## OCR
 
-With the **🌍 Multilingual** model, you can:
-- Search Chinese PDFs with English queries
-- Search English PDFs with Chinese queries
-- Mix languages in your document collection
+- OCR is **off by default** and can be enabled in the OCR selector.
+- **Fast mode**: OCR only for image-heavy pages with little text.
+- **Deep mode**: OCR for all pages that contain images.
 
-When cross-lingual search is active, you'll see: `🌍 Cross-lingual: X results (semantic only)`
-
----
-
-## 🎚️ Search Mode Slider
-
-Adjust how search works:
-
-```
-🧠 Semantic ◀━━━━━━━━━━▶ 🔤 Literal
-```
-
-| Slide Left | Slide Right |
-|------------|-------------|
-| Understands meaning | Matches exact words |
-| *"How to prevent overfitting?"* | *"regularization"* |
+OCR results are cached to speed up later runs.
 
 ---
 
-## 📁 Supported Files
+## Score Fusion
 
-- ✅ PDF (`.pdf`)
-
-> **Tip:** Export your `.pptx` and `.docx` files to PDF for best results
+Choose in **Manage Models**:
+- **RRF (Rank Fusion)** (default)
+- **Percentile Blend**
 
 ---
 
-## 🛠️ Requirements
+## Caches
+
+Caches are stored outside your PDF folder:
+
+- **Index cache**: 
+  - Windows: `%LOCALAPPDATA%\Locus\index_cache`
+  - macOS: `~/Library/Caches/Locus/index_cache`
+  - Linux: `~/.cache/Locus/index_cache`
+- **OCR cache**:
+  - Windows: `%LOCALAPPDATA%\Locus\ocr_cache`
+  - macOS: `~/Library/Caches/Locus/ocr_cache`
+  - Linux: `~/.cache/Locus/ocr_cache`
+- **Model cache**:
+  - Windows: `%LOCALAPPDATA%\Locusastembed_cache`
+  - macOS: `~/Library/Caches/Locus/fastembed_cache`
+  - Linux: `~/.cache/Locus/fastembed_cache`
+
+Use **Manage Models** to clear index or OCR cache.
+
+---
+
+## Requirements
 
 - Python 3.8+
-- ~500MB - 2.5GB disk space (depending on model)
-- PDF reader with command-line support (e.g., [SumatraPDF](https://www.sumatrapdfreader.org/))
+- PDF viewer with page navigation support (SumatraPDF recommended on Windows)
 
----
-
-## 📦 Dependencies
-
+Dependencies:
 ```
-PyMuPDF              # PDF text extraction
-rank-bm25            # Keyword search
-sentence-transformers # Semantic matching
-customtkinter        # Modern GUI
+PyMuPDF
+rank-bm25
+fastembed
+numpy
+customtkinter
+rapidocr-onnxruntime
 ```
 
 ---
 
-## 💡 Tips for Better Results
+## FAQ
 
-1. **Use Deep mode** for large collections — ensures nothing is missed
-2. **Use specific terms** — *"Q-learning update rule"* works better than *"how does it learn"*
-3. **Adjust the slider** — Literal mode for exact terms, semantic mode for concepts
-4. **Try Multilingual** — if you have mixed-language documents
+**Why is indexing slow?**  
+Deep mode precomputes embeddings and OCR can be expensive. Use Fast mode or lower OCR quality.
 
----
+**Does it auto-reindex when PDFs change?**  
+Yes. The app hashes the PDF folder and rebuilds if it changes.
 
-## 🤔 FAQ
-
-**What's the difference between Fast and Deep index?**  
-Fast mode uses BM25 to filter candidates first (may miss semantically related pages). Deep mode searches all pages semantically (slower startup, better results).
-
-**Is this an AI/LLM?**  
-No. It uses embedding models for similarity matching, not generative AI. It finds information — it doesn't generate answers.
-
-**Can I use this during exams?**  
-If "no LLM" is the rule, this tool is fine — it's just a smart search engine for your own materials.
-
-**Why doesn't the page jump work?**  
-Install [SumatraPDF](https://www.sumatrapdfreader.org/) — it has the best command-line page navigation support.
+**Why don't I see a score in RRF mode?**  
+RRF is rank-based; numeric scores are hidden by design.
 
 ---
 
-## 📄 License
+## License
 
-MIT — free for personal and educational use.
-
----
-
-<p align="center">
-  Made for students, by students 📖
-</p>
+MIT - free for personal and educational use.

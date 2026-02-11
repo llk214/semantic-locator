@@ -82,8 +82,8 @@ _STRINGS = {
 
     # ===== Window Title =====
     "app.title": {
-        "en": "📚 Locus - PDF Search",
-        "zh": "📚 Locus - PDF智能搜索",
+        "en": "Locus - PDF Search",
+        "zh": "Locus - PDF智能搜索",
     },
 
     # ===== Top Frame - Directory =====
@@ -478,6 +478,26 @@ _STRINGS = {
     "models.download_error": {
         "en": "Failed to download {quality} model.\n\nError: {error}\n\nPlease check your internet connection and try again.",
         "zh": "下载 {quality} 模型失败。\n\n错误：{error}\n\n请检查网络连接后重试。",
+    },
+    "cache.clear_index": {
+        "en": "Clear Index Cache",
+        "zh": "清除索引缓存",
+    },
+    "cache.clear_ocr": {
+        "en": "Clear OCR Cache",
+        "zh": "清除OCR缓存",
+    },
+    "cache.clear_index_confirm": {
+        "en": "Clear all index cache files?",
+        "zh": "是否清除所有索引缓存？",
+    },
+    "cache.clear_ocr_confirm": {
+        "en": "Clear all OCR cache files?",
+        "zh": "是否清除所有OCR缓存文件？",
+    },
+    "cache.cleared": {
+        "en": "Cache cleared",
+        "zh": "缓存已清除",
     },
 
     # ===== Download Animation =====

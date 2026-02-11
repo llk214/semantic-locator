@@ -45,11 +45,12 @@ class ResultCard(ctk.CTkFrame):
         ctk.CTkLabel(info_frame, text=f"  📄 {page_text}", font=ui_font(10),
                      text_color="gray", anchor="w").pack(side="left")
         
-        # Score badge
-        score_color = "#28a745" if score > 0.7 else "#ffc107" if score > 0.4 else "#6c757d"
-        ctk.CTkLabel(header_frame, text=f"{score:.2f}", font=ui_font(9),
-                     fg_color=score_color, corner_radius=4, text_color="white",
-                     padx=6, pady=1).pack(side="right", padx=(0, 5))
+        # Score badge (optional)
+        if score is not None:
+            score_color = "#28a745" if score > 0.7 else "#ffc107" if score > 0.4 else "#6c757d"
+            ctk.CTkLabel(header_frame, text=f"{score:.2f}", font=ui_font(9),
+                         fg_color=score_color, corner_radius=4, text_color="white",
+                         padx=6, pady=1).pack(side="right", padx=(0, 5))
         
         # Snippet preview
         snippet_short = snippet[:120] + "..." if len(snippet) > 120 else snippet

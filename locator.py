@@ -78,6 +78,23 @@ def _compute_pdf_dir_hash(pdf_dir: Path) -> str:
             continue
     return h.hexdigest()
 
+
+def _default_index_cache_dir() -> Path:
+    """Persistent cache directory for index files."""
+    home = str(Path.home())
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or home
+        return Path(base) / "Locus" / "index_cache"
+    if sys.platform == "darwin":
+        return Path(home) / "Library" / "Caches" / "Locus" / "index_cache"
+    return Path(home) / ".cache" / "Locus" / "index_cache"
+
+
+def _index_cache_prefix(pdf_dir: Path, ocr_mode: str, ocr_dpi: int) -> str:
+    """Stable prefix for cache files per folder + OCR settings."""
+    folder_hash = _compute_pdf_dir_hash(pdf_dir)
+    return f"locator_{folder_hash}_{ocr_mode}_dpi{ocr_dpi}"
+
 import fitz  # PyMuPDF
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -553,7 +570,8 @@ class SemanticReranker:
         results = []
         for idx in sorted_indices:
             doc, _ = candidates[idx]
-            results.append((doc, float(combined_scores[idx])))
+            score = None if fusion_method == "rrf" else float(combined_scores[idx])
+            results.append((doc, score))
         
         return results
 
@@ -576,8 +594,11 @@ class HybridLocator:
         """Build or load the search index."""
         if ocr_mode not in ("fast", "deep", "off"):
             ocr_mode = "fast"
-        cache_path = self.pdf_dir / f".locator_cache_{ocr_mode}_dpi{ocr_dpi}.pkl"
-        meta_path = self.pdf_dir / f".locator_cache_{ocr_mode}_dpi{ocr_dpi}.meta.json"
+        cache_dir = _default_index_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        prefix = _index_cache_prefix(self.pdf_dir, ocr_mode, ocr_dpi)
+        cache_path = cache_dir / f"{prefix}.pkl"
+        meta_path = cache_dir / f"{prefix}.meta.json"
 
         # Try to load from cache
         if not force_rebuild and cache_path.exists():
@@ -777,11 +798,12 @@ class HybridLocator:
         for doc, score in results:
             # Extract a relevant snippet
             snippet = self._extract_snippet(doc.text, query)
+            score_val = None if score is None else round(score, 3)
             output.append({
                 'pdf_name': doc.pdf_name,
                 'page_num': doc.page_num,
                 'chunk_id': doc.chunk_id,
-                'score': round(score, 3),
+                'score': score_val,
                 'snippet': snippet
             })
         
@@ -829,11 +851,12 @@ class HybridLocator:
         for idx in top_indices:
             doc = self.documents[idx]
             snippet = self._extract_snippet(doc.text, query)
+            score = None if fusion_method == "rrf" else round(float(combined_scores[idx]), 3)
             output.append({
                 'pdf_name': doc.pdf_name,
                 'page_num': doc.page_num,
                 'chunk_id': doc.chunk_id,
-                'score': round(float(combined_scores[idx]), 3),
+                'score': score,
                 'snippet': snippet
             })
         
@@ -878,7 +901,8 @@ class HybridLocator:
         
         for i, r in enumerate(results, 1):
             chunk_info = f", Chunk {r['chunk_id']}" if r.get("chunk_id") else ""
-            lines.append(f"\n{i}. {r['pdf_name']} - Page {r['page_num']}{chunk_info} (score: {r['score']})")
+            score_info = f" (score: {r['score']})" if r.get("score") is not None else ""
+            lines.append(f"\n{i}. {r['pdf_name']} - Page {r['page_num']}{chunk_info}{score_info}")
             lines.append(f"   {r['snippet']}")
         
         return '\n'.join(lines)

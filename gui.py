@@ -7,6 +7,7 @@ Supports Chinese / English language switching
 import sys
 import os
 import io
+import ctypes
 
 # Suppress HuggingFace symlink warning on Windows
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -78,6 +79,24 @@ ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
 
 
+def _app_path(filename: str) -> str:
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    direct = os.path.join(base, filename)
+    internal = os.path.join(base, "_internal", filename)
+    return internal if os.path.exists(internal) else direct
+
+
+def _set_windows_app_id():
+    if os.name == "nt":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Locus.App")
+        except Exception:
+            pass
+
+
 class LocatorGUI(ctk.CTk):
     
     # ---- Central model registry ----
@@ -113,7 +132,12 @@ class LocatorGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         
+        _set_windows_app_id()
         self.title(t("app.title"))
+        try:
+            self.iconbitmap(_app_path("locus.ico"))
+        except Exception:
+            pass
         self.geometry("900x650")
         self.minsize(750, 500)
         
@@ -659,6 +683,47 @@ class LocatorGUI(ctk.CTk):
     
     def _manage_models(self):
         show_manage_models_dialog(self)
+
+    def _clear_index_cache(self):
+        pdf_dir = self.dir_entry.get()
+        if not pdf_dir or not Path(pdf_dir).exists():
+            messagebox.showerror(t("dialog.error"), t("dialog.invalid_dir"))
+            return
+        if not messagebox.askyesno(t("dialog.info"), t("cache.clear_index_confirm")):
+            return
+        try:
+            base = os.environ.get("LOCALAPPDATA") if os.name == "nt" else str(Path.home())
+            cache_dir = Path(base) / "Locus" / "index_cache"
+            if cache_dir.exists():
+                for p in cache_dir.glob("*.pkl"):
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+                for p in cache_dir.glob("*.meta.json"):
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+            self.status_var.set(t("cache.cleared"))
+        except Exception:
+            pass
+
+    def _clear_ocr_cache(self):
+        if not messagebox.askyesno(t("dialog.info"), t("cache.clear_ocr_confirm")):
+            return
+        try:
+            base = os.environ.get("LOCALAPPDATA") if os.name == "nt" else str(Path.home())
+            ocr_dir = Path(base) / "Locus" / "ocr_cache"
+            if ocr_dir.exists():
+                for p in ocr_dir.glob("*.txt"):
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+            self.status_var.set(t("cache.cleared"))
+        except Exception:
+            pass
     
     # ---- Index loading ----
     
