@@ -121,9 +121,6 @@ rapidocr-onnxruntime
 **Why is indexing slow?**  
 Deep mode precomputes embeddings and OCR can be expensive. Use Fast mode or lower OCR quality.
 
-**Does it auto-reindex when PDFs change?**  
-Yes. The app hashes the PDF folder and rebuilds if it changes.
-
 **Why don't I see a score in RRF mode?**  
 RRF is rank-based; numeric scores are hidden by design.
 
