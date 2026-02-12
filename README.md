@@ -1,11 +1,14 @@
 # Locus - PDF Semantic Search
 
 **Find the exact page that answers your question.**
+<p align="center">
+  <img src="assets/demo.png" width="900">
+</p>
+
 
 A lightweight desktop app for students and researchers to search PDF folders using natural language.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ---
